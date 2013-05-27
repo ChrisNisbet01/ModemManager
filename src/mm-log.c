@@ -326,7 +326,7 @@ mm_log_setup (const char *level,
     } else
 #endif
     if (log_file == NULL) {
-        openlog (G_LOG_DOMAIN, LOG_CONS | LOG_PID | LOG_PERROR, LOG_DAEMON);
+        openlog (G_LOG_DOMAIN, LOG_CONS | LOG_PID, LOG_DAEMON);
         log_backend = log_backend_syslog;
     } else {
         logfd = open (log_file,
