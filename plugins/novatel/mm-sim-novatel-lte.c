@@ -65,8 +65,8 @@ imsi_read_ready (MMBaseModem *modem,
     str = mm_strip_tag (response, "+CRSM:");
 
     /* With or without quotes... */
-    if (sscanf (str, "%d,%d,\"%18c\"", &sw1, &sw2, (char *) &buf) != 3 &&
-        sscanf (str, "%d,%d,%18c", &sw1, &sw2, (char *) &buf) != 3) {
+    if (sscanf (str, "%d,%d,\"%18s\"", &sw1, &sw2, (char *) &buf) != 3 &&
+        sscanf (str, "%d,%d,%18s", &sw1, &sw2, (char *) &buf) != 3) {
         g_task_return_new_error (task,
                                  MM_CORE_ERROR,
                                  MM_CORE_ERROR_FAILED,
