@@ -10463,7 +10463,8 @@ disabling_context_free (DisablingContext *ctx)
         mm_iface_modem_update_state (MM_IFACE_MODEM (ctx->self),
                                      MM_MODEM_STATE_DISABLED,
                                      MM_MODEM_STATE_CHANGE_REASON_USER_REQUESTED);
-    else if (ctx->previous_state != MM_MODEM_STATE_DISABLED) {
+    else if (ctx->previous_state != MM_MODEM_STATE_DISABLED &&
+             ctx->previous_state != MM_MODEM_STATE_UNKNOWN) {
         /* Fallback to previous state */
         mm_iface_modem_update_state (MM_IFACE_MODEM (ctx->self),
                                      ctx->previous_state,
@@ -10830,7 +10831,8 @@ enabling_context_free (EnablingContext *ctx)
         mm_iface_modem_update_state (MM_IFACE_MODEM (ctx->self),
                                      MM_MODEM_STATE_ENABLED,
                                      MM_MODEM_STATE_CHANGE_REASON_USER_REQUESTED);
-    else if (ctx->previous_state != MM_MODEM_STATE_ENABLED) {
+    else if (ctx->previous_state != MM_MODEM_STATE_ENABLED &&
+             ctx->previous_state != MM_MODEM_STATE_UNKNOWN) {
         /* Fallback to previous state */
         mm_iface_modem_update_state (MM_IFACE_MODEM (ctx->self),
                                      ctx->previous_state,
