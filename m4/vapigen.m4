@@ -23,7 +23,7 @@ dnl Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  US
 # See http://live.gnome.org/Vala/UpstreamGuide for detailed documentation
 AC_DEFUN([VAPIGEN_CHECK],
 [
-  AS_IF([test "x$3" != "xyes"], [
+  AS_IF([test "x$3" != "xyes"],:;[
       m4_provide_if([GOBJECT_INTROSPECTION_CHECK], [], [
           m4_provide_if([GOBJECT_INTROSPECTION_REQUIRE], [], [
               AC_MSG_ERROR([[You must call GOBJECT_INTROSPECTION_CHECK or GOBJECT_INTROSPECTION_REQUIRE before using VAPIGEN_CHECK unless using the FOUND_INTROSPECTION argument is "yes"]])
