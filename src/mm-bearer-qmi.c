@@ -1943,12 +1943,10 @@ stop_network_ready (QmiClientWds *client,
             ctx->error_ipv4 = error;
         else
             ctx->error_ipv6 = error;
-    } else {
-        /* Clear internal status */
-        reset_bearer_connection (self,
-                                 ctx->running_ipv4,
-                                 ctx->running_ipv6);
     }
+
+    /* Clear internal status */
+    reset_bearer_connection (self, TRUE, TRUE);
 
     if (output)
         qmi_message_wds_stop_network_output_unref (output);
