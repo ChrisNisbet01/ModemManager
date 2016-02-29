@@ -3346,18 +3346,12 @@ internal_load_unlock_required_ready (MMIfaceModem *self,
             g_error_matches (error,
                              MM_MOBILE_EQUIPMENT_ERROR,
                              MM_MOBILE_EQUIPMENT_ERROR_SIM_WRONG)) {
-            /* SIM errors are only critical in 3GPP-only devices */
-            if (!mm_iface_modem_is_cdma (self)) {
-                ctx->saved_error = error;
-                ctx->step = UPDATE_LOCK_INFO_CONTEXT_STEP_LAST;
-                update_lock_info_context_step (task);
-                return;
-            }
+            /* SIM errors are critical */
+            ctx->saved_error = error;
+            ctx->step = UPDATE_LOCK_INFO_CONTEXT_STEP_LAST;
+            update_lock_info_context_step (task);
+            return;
 
-            /* For mixed 3GPP+3GPP2 devices, skip SIM errors */
-            mm_obj_dbg (self, "skipping SIM error in 3GPP2-capable device, assuming no lock is needed");
-            g_error_free (error);
-            ctx->lock = MM_MODEM_LOCK_NONE;
         } else {
             mm_obj_dbg (self, "couldn't check if unlock required: %s", error->message);
             g_error_free (error);
@@ -3410,7 +3404,7 @@ update_lock_info_context_step (GTask *task)
         /* If we get that no lock is required, run the after SIM unlock step
          * in order to wait for the SIM to get ready.  Skip waiting on
          * CDMA-only modems where we don't support a SIM. */
-        if (!mm_iface_modem_is_cdma_only (self) &&
+        if (/*!mm_iface_modem_is_cdma_only (self) &&*/
             (ctx->lock == MM_MODEM_LOCK_NONE ||
              ctx->lock == MM_MODEM_LOCK_SIM_PIN2 ||
              ctx->lock == MM_MODEM_LOCK_SIM_PUK2)) {
@@ -4093,6 +4087,7 @@ initialization_context_free (InitializationContext *ctx)
         interface_initialization_step (task);                           \
     }
 
+#if 0
 static void
 current_capabilities_internal_load_unlock_required_ready (MMIfaceModem *self,
                                                           GAsyncResult *res,
@@ -4116,15 +4111,7 @@ current_capabilities_internal_load_unlock_required_ready (MMIfaceModem *self,
             g_error_matches (error,
                              MM_MOBILE_EQUIPMENT_ERROR,
                              MM_MOBILE_EQUIPMENT_ERROR_SIM_WRONG)) {
-            MMModemCapability caps;
-
-            mm_obj_dbg (self, "multimode device without SIM, no 3GPP capabilities");
-            caps = mm_gdbus_modem_get_current_capabilities (ctx->skeleton);
-            caps &= ~MM_MODEM_CAPABILITY_3GPP;
-
-            /* CDMA-EVDO must still be around */
-            g_assert (caps & MM_MODEM_CAPABILITY_CDMA_EVDO);
-            mm_gdbus_modem_set_current_capabilities (ctx->skeleton, caps);
+            mm_gdbus_modem_set_current_capabilities (ctx->skeleton, MM_MODEM_CAPABILITY_NONE);
         }
 
         g_error_free (error);
@@ -4134,6 +4121,7 @@ current_capabilities_internal_load_unlock_required_ready (MMIfaceModem *self,
     ctx->step++;
     interface_initialization_step (task);
 }
+#endif
 
 static void
 load_current_capabilities_ready (MMIfaceModem *self,
@@ -4190,17 +4178,6 @@ load_current_capabilities_ready (MMIfaceModem *self,
      * multimode device check. No big deal in updating them twice, as we're not
      * exposed in DBus yet. */
     mm_gdbus_modem_set_current_capabilities (ctx->skeleton, caps);
-
-    /* If the device is a multimode device (3GPP+3GPP2) check whether we have a
-     * SIM or not. */
-    if ((caps & MM_MODEM_CAPABILITY_CDMA_EVDO) && (caps & MM_MODEM_CAPABILITY_3GPP)) {
-        mm_obj_dbg (self, "checking if multimode device has a SIM...");
-        internal_load_unlock_required (
-            self,
-            (GAsyncReadyCallback)current_capabilities_internal_load_unlock_required_ready,
-            task);
-        return;
-    }
 
     ctx->step++;
     interface_initialization_step (task);
@@ -5107,7 +5084,7 @@ interface_initialization_step (GTask *task)
     case INITIALIZATION_STEP_SIM:
         /* If the modem doesn't need any SIM (not implemented by plugin, or not
          * needed in CDMA-only modems) */
-        if (!mm_iface_modem_is_cdma_only (self) &&
+        if (/*!mm_iface_modem_is_cdma_only (self) &&*/
             MM_IFACE_MODEM_GET_INTERFACE (self)->create_sim &&
             MM_IFACE_MODEM_GET_INTERFACE (self)->create_sim_finish) {
             MMBaseSim *sim = NULL;
