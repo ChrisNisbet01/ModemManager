@@ -368,6 +368,8 @@ mm_log_shutdown (void)
 {
     if (logfd < 0)
         closelog ();
-    else
+    else {
         close (logfd);
+        logfd = -1;
+    }
 }
