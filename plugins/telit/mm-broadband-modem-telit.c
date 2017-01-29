@@ -1171,6 +1171,9 @@ response_processor_service_ignore_at_errors (MMBaseModem *self,
         case 3:
             *result = g_variant_new_uint32 (MM_MODEM_ACCESS_TECHNOLOGY_EVDOA);
             return TRUE;
+        case 4:
+            *result = g_variant_new_uint32 (MM_MODEM_ACCESS_TECHNOLOGY_LTE);
+            return TRUE;
         default:
             break;
         }
