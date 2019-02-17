@@ -78,6 +78,8 @@ MMPortSubsys    mm_port_get_subsys         (MMPort *self);
 MMPortType      mm_port_get_port_type      (MMPort *self);
 gboolean        mm_port_get_connected      (MMPort *self);
 void            mm_port_set_connected      (MMPort *self, gboolean connected);
+gboolean        mm_port_get_claimed        (MMPort *self);
+void            mm_port_set_claimed        (MMPort *self, gboolean claimed);
 MMKernelDevice *mm_port_peek_kernel_device (MMPort *self);
 
 #endif /* MM_PORT_H */

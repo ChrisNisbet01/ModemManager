@@ -463,6 +463,9 @@ connect_context_free (ConnectContext *ctx)
     g_free (ctx->user);
     g_free (ctx->password);
 
+    if (ctx->data)
+        mm_port_set_claimed ((MMPort *)ctx->data, FALSE);
+
     if (ctx->packet_service_status_ipv4_indication_id) {
         common_setup_cleanup_packet_service_status_unsolicited_events (ctx->self,
                                                                        ctx->client_ipv4,
@@ -1788,6 +1791,10 @@ _connect (MMBaseBearer *_self,
                            g_object_ref (operation_cancellable),
                            g_object_unref);
 
+    /* Claim the data port so other bearers do not try to use it while this
+     * bearer is connecting. */
+    mm_port_set_claimed ((MMPort *)ctx->data, TRUE);
+
     /* Run! */
     connect_context_step (task);
 
@@ -1820,6 +1827,8 @@ typedef struct {
     QmiClientWds *client_ipv6;
     guint32 packet_data_handle_ipv6;
     GError *error_ipv6;
+
+    MMPort *data;
 } DisconnectContext;
 
 static void
@@ -1833,6 +1842,8 @@ disconnect_context_free (DisconnectContext *ctx)
         g_object_unref (ctx->client_ipv4);
     if (ctx->client_ipv6)
         g_object_unref (ctx->client_ipv6);
+    if (ctx->data)
+        mm_port_set_claimed ((MMPort *)ctx->data, FALSE);
     g_slice_free (DisconnectContext, ctx);
 }
 
@@ -2069,6 +2080,7 @@ disconnect (MMBaseBearer *_self,
     }
 
     ctx = g_slice_new0 (DisconnectContext);
+    ctx->data = g_object_ref (self->priv->data);
     ctx->client_ipv4 = self->priv->client_ipv4 ? g_object_ref (self->priv->client_ipv4) : NULL;
     ctx->packet_data_handle_ipv4 = self->priv->packet_data_handle_ipv4;
     ctx->client_ipv6 = self->priv->client_ipv6 ? g_object_ref (self->priv->client_ipv6) : NULL;
@@ -2076,6 +2088,8 @@ disconnect (MMBaseBearer *_self,
     ctx->step = DISCONNECT_STEP_FIRST;
 
     g_task_set_task_data (task, ctx, (GDestroyNotify)disconnect_context_free);
+
+    mm_port_set_claimed ((MMPort *)ctx->data, TRUE);
 
     /* Run! */
     disconnect_context_step (task);

@@ -42,6 +42,7 @@ struct _MMPortPrivate {
     MMPortSubsys subsys;
     MMPortType ptype;
     gboolean connected;
+    gboolean claimed;
     MMKernelDevice *kernel_device;
 };
 
@@ -93,6 +94,27 @@ mm_port_set_connected (MMPort *self, gboolean connected)
         self->priv->connected = connected;
         g_object_notify (G_OBJECT (self), MM_PORT_CONNECTED);
         mm_obj_dbg (self, "port now %s", connected ? "connected" : "disconnected");
+    }
+}
+
+gboolean
+mm_port_get_claimed (MMPort *self)
+{
+    g_return_val_if_fail (self != NULL, FALSE);
+    g_return_val_if_fail (MM_IS_PORT (self), FALSE);
+
+    return self->priv->claimed;
+}
+
+void
+mm_port_set_claimed (MMPort *self, gboolean claimed)
+{
+    g_return_if_fail (self != NULL);
+    g_return_if_fail (MM_IS_PORT (self));
+
+    if (self->priv->claimed != claimed) {
+        self->priv->claimed = claimed;
+        mm_obj_dbg (self, "port now %s", claimed ? "claimed" : "unclaimed");
     }
 }
 
