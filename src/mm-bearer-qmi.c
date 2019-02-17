@@ -426,6 +426,7 @@ typedef struct {
     MMBearerQmi *self;
     ConnectStep step;
     MMPort *data;
+    guint data_profile_index;
     MMPortQmi *qmi;
     gboolean explicit_qmi_open;
     gchar *user;
@@ -686,6 +687,14 @@ build_start_network_input (ConnectContext *ctx)
             input,
             (ctx->running_ipv6 ? QMI_WDS_IP_FAMILY_IPV6 : QMI_WDS_IP_FAMILY_IPV4),
             NULL);
+    }
+
+    if (ctx->data_profile_index) {
+        mm_obj_dbg (ctx->data,
+            "using 3GPP profile index %d for APN %s",
+            ctx->data_profile_index,
+            ctx->apn);
+        qmi_message_wds_start_network_input_set_profile_index_3gpp (input, ctx->data_profile_index, NULL);
     }
 
     return input;
@@ -1671,6 +1680,7 @@ _connect (MMBaseBearer *_self,
     MMPortQmi *qmi = NULL;
     GError *error = NULL;
     const gchar *apn;
+    const gchar *number;
     GTask *task;
     GCancellable *operation_cancellable = NULL;
 
@@ -1744,6 +1754,13 @@ _connect (MMBaseBearer *_self,
     ctx->data = g_object_ref (data);
     ctx->step = CONNECT_STEP_FIRST;
     ctx->ip_method = MM_BEARER_IP_METHOD_UNKNOWN;
+
+    number = mm_bearer_properties_get_number (mm_base_bearer_peek_config (MM_BASE_BEARER (self)));
+    if (number && *number) {
+        ctx->data_profile_index = g_ascii_strtoull (number, NULL, 10);
+        if (ctx->data_profile_index > 16)
+            ctx->data_profile_index = 0;
+    }
 
     g_object_get (self,
                   MM_BASE_BEARER_CONFIG, &properties,
