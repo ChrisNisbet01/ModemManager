@@ -409,12 +409,14 @@ typedef enum {
     CONNECT_STEP_IP_METHOD,
     CONNECT_STEP_IPV4,
     CONNECT_STEP_WDS_CLIENT_IPV4,
+    CONNECT_STEP_BIND_MUX_IPV4,
     CONNECT_STEP_IP_FAMILY_IPV4,
     CONNECT_STEP_ENABLE_INDICATIONS_IPV4,
     CONNECT_STEP_START_NETWORK_IPV4,
     CONNECT_STEP_GET_CURRENT_SETTINGS_IPV4,
     CONNECT_STEP_IPV6,
     CONNECT_STEP_WDS_CLIENT_IPV6,
+    CONNECT_STEP_BIND_MUX_IPV6,
     CONNECT_STEP_IP_FAMILY_IPV6,
     CONNECT_STEP_ENABLE_INDICATIONS_IPV6,
     CONNECT_STEP_START_NETWORK_IPV6,
@@ -429,6 +431,8 @@ typedef struct {
     guint data_profile_index;
     MMPortQmi *qmi;
     gboolean explicit_qmi_open;
+    guint32 mux_id;
+    guint32 data_ep_iface_num;
     gchar *user;
     gchar *password;
     gchar *apn;
@@ -1010,6 +1014,32 @@ get_current_settings (GTask *task, QmiClientWds *client)
 }
 
 static void
+bind_mux_data_port_ready (QmiClientWds *client,
+                          GAsyncResult *res,
+                          GTask *task)
+{
+    ConnectContext *ctx;
+    GError *error = NULL;
+    QmiMessageWdsBindMuxDataPortOutput *output;
+
+    ctx = g_task_get_task_data (task);
+
+    output = qmi_client_wds_bind_mux_data_port_finish (client, res, &error);
+    if (!output || !qmi_message_wds_bind_mux_data_port_output_get_result (output, &error)) {
+        mm_obj_err (ctx->self, "Failed to bind mux data port: %s\n", error->message);
+        g_error_free (error);
+    }
+
+    if (output)
+        qmi_message_wds_bind_mux_data_port_output_unref (output);
+
+    /* Keep on */
+    ctx->step++;
+    connect_context_step (task);
+}
+
+
+static void
 set_ip_family_ready (QmiClientWds *client,
                      GAsyncResult *res,
                      GTask *task)
@@ -1293,11 +1323,11 @@ qmi_port_allocate_client_ready (MMPortQmi *qmi,
     if (ctx->running_ipv4)
         ctx->client_ipv4 = QMI_CLIENT_WDS (mm_port_qmi_get_client (qmi,
                                                                    QMI_SERVICE_WDS,
-                                                                   MM_PORT_QMI_FLAG_WDS_IPV4));
+                                                                   MM_PORT_QMI_FLAG_WDS_IPV4 + ctx->mux_id));
     else
         ctx->client_ipv6 = QMI_CLIENT_WDS (mm_port_qmi_get_client (qmi,
                                                                    QMI_SERVICE_WDS,
-                                                                   MM_PORT_QMI_FLAG_WDS_IPV6));
+                                                                   MM_PORT_QMI_FLAG_WDS_IPV6 + ctx->mux_id));
 
     /* Keep on */
     ctx->step++;
@@ -1325,6 +1355,18 @@ qmi_port_open_ready (MMPortQmi *qmi,
     /* Keep on */
     ctx->step++;
     connect_context_step (task);
+}
+
+static guint32
+get_mux_id(MMPort *data)
+{
+    const char *name;
+    guint64 v = G_MAXUINT64;
+
+    name = mm_port_get_device (data);
+    if (name && (name = strchr (name, '.')) && name[1])
+        v = g_ascii_strtoull (name + 1, NULL, 10);
+    return v < G_MAXUINT32 ? v : 0;
 }
 
 static void
@@ -1416,12 +1458,12 @@ connect_context_step (GTask *task)
 
         client = mm_port_qmi_get_client (ctx->qmi,
                                          QMI_SERVICE_WDS,
-                                         MM_PORT_QMI_FLAG_WDS_IPV4);
+                                         MM_PORT_QMI_FLAG_WDS_IPV4 + ctx->mux_id);
         if (!client) {
             mm_obj_dbg (self, "allocating IPv4-specific WDS client");
             mm_port_qmi_allocate_client (ctx->qmi,
                                          QMI_SERVICE_WDS,
-                                         MM_PORT_QMI_FLAG_WDS_IPV4,
+                                         MM_PORT_QMI_FLAG_WDS_IPV4 + ctx->mux_id,
                                          g_task_get_cancellable (task),
                                          (GAsyncReadyCallback)qmi_port_allocate_client_ready,
                                          task);
@@ -1431,6 +1473,30 @@ connect_context_step (GTask *task)
         ctx->client_ipv4 = QMI_CLIENT_WDS (client);
         ctx->step++;
     } /* fall through */
+
+    case CONNECT_STEP_BIND_MUX_IPV4:
+        /* Associate the QMAP-muxed data port with the allocated WDS client. */
+        if (ctx->mux_id) {
+            QmiMessageWdsBindMuxDataPortInput *input;
+
+            mm_obj_dbg (self, "Binding IPv4 WDS client to mux id %d on data port on USB interface number %d", ctx->mux_id, ctx->data_ep_iface_num);
+            input = qmi_message_wds_bind_mux_data_port_input_new ();
+            qmi_message_wds_bind_mux_data_port_input_set_endpoint_info (input, QMI_DATA_ENDPOINT_TYPE_HSUSB, ctx->data_ep_iface_num, NULL);
+            qmi_message_wds_bind_mux_data_port_input_set_mux_id (input, ctx->mux_id, NULL);
+            qmi_message_wds_bind_mux_data_port_input_set_client_type (input, QMI_WDS_CLIENT_TYPE_TETHERED, NULL);
+
+            qmi_client_wds_bind_mux_data_port (ctx->client_ipv4,
+                                               input,
+                                               10,
+                                               g_task_get_cancellable (task),
+                                               (GAsyncReadyCallback) bind_mux_data_port_ready,
+                                               task);
+            qmi_message_wds_bind_mux_data_port_input_unref (input);
+            return;
+        }
+
+        /* Just fall down */
+        ctx->step++;
 
     case CONNECT_STEP_IP_FAMILY_IPV4:
         /* If client is new enough, select IP family */
@@ -1513,12 +1579,12 @@ connect_context_step (GTask *task)
 
         client = mm_port_qmi_get_client (ctx->qmi,
                                          QMI_SERVICE_WDS,
-                                         MM_PORT_QMI_FLAG_WDS_IPV6);
+                                         MM_PORT_QMI_FLAG_WDS_IPV6 + ctx->mux_id);
         if (!client) {
             mm_obj_dbg (self, "allocating IPv6-specific WDS client");
             mm_port_qmi_allocate_client (ctx->qmi,
                                          QMI_SERVICE_WDS,
-                                         MM_PORT_QMI_FLAG_WDS_IPV6,
+                                         MM_PORT_QMI_FLAG_WDS_IPV6 + ctx->mux_id,
                                          g_task_get_cancellable (task),
                                          (GAsyncReadyCallback)qmi_port_allocate_client_ready,
                                          task);
@@ -1528,6 +1594,30 @@ connect_context_step (GTask *task)
         ctx->client_ipv6 = QMI_CLIENT_WDS (client);
         ctx->step++;
     } /* fall through */
+
+    case CONNECT_STEP_BIND_MUX_IPV6:
+        /* Associate the QMAP-muxed data port with the allocated WDS client. */
+        if (ctx->mux_id) {
+            QmiMessageWdsBindMuxDataPortInput *input;
+
+            mm_obj_dbg (self, "Binding IPv6 WDS client to mux id %d on data port on USB interface number %d", ctx->mux_id, ctx->data_ep_iface_num);
+            input = qmi_message_wds_bind_mux_data_port_input_new ();
+            qmi_message_wds_bind_mux_data_port_input_set_endpoint_info (input, QMI_DATA_ENDPOINT_TYPE_HSUSB, ctx->data_ep_iface_num, NULL);
+            qmi_message_wds_bind_mux_data_port_input_set_mux_id (input, ctx->mux_id, NULL);
+            qmi_message_wds_bind_mux_data_port_input_set_client_type (input, QMI_WDS_CLIENT_TYPE_TETHERED, NULL);
+
+            qmi_client_wds_bind_mux_data_port (ctx->client_ipv6,
+                                               input,
+                                               10,
+                                               g_task_get_cancellable (task),
+                                               (GAsyncReadyCallback) bind_mux_data_port_ready,
+                                               task);
+            qmi_message_wds_bind_mux_data_port_input_unref (input);
+            return;
+        }
+
+        /* Just fall down */
+        ctx->step++;
 
     case CONNECT_STEP_IP_FAMILY_IPV6:
 
@@ -1760,6 +1850,19 @@ _connect (MMBaseBearer *_self,
         ctx->data_profile_index = g_ascii_strtoull (number, NULL, 10);
         if (ctx->data_profile_index > 16)
             ctx->data_profile_index = 0;
+    }
+
+    ctx->mux_id = get_mux_id (data);
+    if (ctx->mux_id) {
+        MMKernelDevice *kernel_device;
+        /* Find the QMAP data endpoint using the same method as in mm-port-qmi.c */
+        kernel_device = mm_port_peek_kernel_device (MM_PORT (qmi));
+        if (mm_kernel_device_has_property (kernel_device, "ID_MM_PORT_QMI_QMAP_DATA_EP")) {
+            ctx->data_ep_iface_num = mm_kernel_device_get_property_as_int_hex (kernel_device,
+                                                          "ID_MM_PORT_QMI_QMAP_DATA_EP");
+        } else {
+            ctx->data_ep_iface_num = 0;
+        }
     }
 
     g_object_get (self,

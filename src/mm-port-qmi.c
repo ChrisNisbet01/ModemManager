@@ -232,6 +232,7 @@ typedef enum {
     PORT_OPEN_STEP_OPEN_WITHOUT_DATA_FORMAT,
     PORT_OPEN_STEP_GET_KERNEL_DATA_FORMAT,
     PORT_OPEN_STEP_ALLOCATE_WDA_CLIENT,
+    PORT_OPEN_STEP_SET_QMAP_PROTOCOL,
     PORT_OPEN_STEP_GET_WDA_DATA_FORMAT,
     PORT_OPEN_STEP_CHECK_DATA_FORMAT,
     PORT_OPEN_STEP_SET_KERNEL_DATA_FORMAT,
@@ -377,6 +378,34 @@ get_data_format_ready (QmiClientWda *client,
     if (output)
         qmi_message_wda_get_data_format_output_unref (output);
 
+    port_open_step (task);
+}
+
+static void
+set_data_format_ready (QmiClientWda *client,
+                       GAsyncResult *res,
+                       GTask *task)
+{
+    MMPortQmi *self;
+    PortOpenContext *ctx;
+    QmiMessageWdaSetDataFormatOutput *output;
+    GError *error = NULL;
+    /* TODO: Check protocol in response message ?
+     * QmiWdaDataAggregationProtocol data_aggregation_protocol;
+     */
+
+    self = g_task_get_source_object (task);
+    ctx = g_task_get_task_data (task);
+    output = qmi_client_wda_set_data_format_finish (client, res, &error);
+    if (!output || !qmi_message_wda_set_data_format_output_get_result (output, &error)) {
+        mm_obj_err (self, "Failed to set data format: %s\n", error->message);
+        g_error_free (error);
+    }
+
+    if (output)
+        qmi_message_wda_set_data_format_output_unref (output);
+
+    ctx->step++;
     port_open_step (task);
 }
 
@@ -539,6 +568,46 @@ port_open_step (GTask *task)
                                     (GAsyncReadyCallback) allocate_client_wda_ready,
                                     task);
         return;
+
+    case PORT_OPEN_STEP_SET_QMAP_PROTOCOL: {
+        MMKernelDevice *kernel_device;
+
+        kernel_device = mm_port_peek_kernel_device (MM_PORT (self));
+        if (mm_kernel_device_get_property_as_boolean (kernel_device, "ID_MM_PORT_QMI_QMAP")) {
+            QmiMessageWdaSetDataFormatInput *input;
+            guint32 ep_iface_num;
+
+            if (mm_kernel_device_has_property (kernel_device, "ID_MM_PORT_QMI_QMAP_DATA_EP")) {
+                /* A udev rule has identified which USB interface number the corresponding
+                 * data port is on */
+                ep_iface_num = mm_kernel_device_get_property_as_int_hex (kernel_device,
+                                                                        "ID_MM_PORT_QMI_QMAP_DATA_EP");
+            } else {
+                /* Fallback. This seems to work a lot anyway. */
+                ep_iface_num = 0;
+            }
+
+            input = qmi_message_wda_set_data_format_input_new ();
+            qmi_message_wda_set_data_format_input_set_link_layer_protocol (input, QMI_WDA_LINK_LAYER_PROTOCOL_RAW_IP, NULL);
+            qmi_message_wda_set_data_format_input_set_uplink_data_aggregation_protocol (input, QMI_WDA_DATA_AGGREGATION_PROTOCOL_QMAP, NULL);
+            qmi_message_wda_set_data_format_input_set_downlink_data_aggregation_protocol (input, QMI_WDA_DATA_AGGREGATION_PROTOCOL_QMAP, NULL);
+            qmi_message_wda_set_data_format_input_set_endpoint_info (input, QMI_DATA_ENDPOINT_TYPE_HSUSB, ep_iface_num, NULL);
+            /* Set these to some large numbers. The modem will clamp them to what it can handle */
+            qmi_message_wda_set_data_format_input_set_downlink_data_aggregation_max_size (input, 32768, NULL);
+            qmi_message_wda_set_data_format_input_set_downlink_data_aggregation_max_datagrams (input, 32, NULL);
+
+            mm_obj_dbg (self, "Setting data port on USB interface number %d to use QMAP protocol...", ep_iface_num);
+            qmi_client_wda_set_data_format (QMI_CLIENT_WDA (ctx->wda),
+                                            input,
+                                            10,
+                                            g_task_get_cancellable (task),
+                                            (GAsyncReadyCallback)set_data_format_ready,
+                                            task);
+            qmi_message_wda_set_data_format_input_unref (input);
+            return;
+        }
+        ctx->step++;
+    }
 
     case PORT_OPEN_STEP_GET_WDA_DATA_FORMAT:
         /* If we have WDA client, query current data format */
