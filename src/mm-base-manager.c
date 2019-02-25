@@ -429,7 +429,7 @@ handle_kernel_event (MMBaseManager            *self,
     mm_obj_dbg (self, "  uid:       %s", uid ? uid : "n/a");
 
 #if defined WITH_UDEV
-    kernel_device = mm_kernel_device_udev_new_from_properties (properties, error);
+    kernel_device = mm_kernel_device_udev_new_from_properties (properties, self->priv->udev, error);
 #else
     kernel_device = mm_kernel_device_generic_new (properties, error);
 #endif
@@ -469,7 +469,7 @@ handle_uevent (GUdevClient *client,
     g_return_if_fail (subsys != NULL);
     g_return_if_fail (g_str_equal (subsys, "tty") || g_str_equal (subsys, "net") || g_str_has_prefix (subsys, "usb"));
 
-    kernel_device = mm_kernel_device_udev_new (device);
+    kernel_device = mm_kernel_device_udev_new (device, client);
 
     /* We only care about tty/net and usb/cdc-wdm devices when adding modem ports,
      * but for remove, also handle usb parent device remove events
@@ -495,7 +495,7 @@ start_device_added_idle (StartDeviceAdded *ctx)
 {
     MMKernelDevice *kernel_device;
 
-    kernel_device = mm_kernel_device_udev_new (ctx->device);
+    kernel_device = mm_kernel_device_udev_new (ctx->device, ctx->self->priv->udev);
     device_added (ctx->self, kernel_device, FALSE, ctx->manual_scan);
     g_object_unref (kernel_device);
 

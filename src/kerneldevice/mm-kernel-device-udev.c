@@ -41,6 +41,7 @@ struct _MMKernelDeviceUdevPrivate {
     GUdevDevice *device;
     GUdevDevice *interface;
     GUdevDevice *physdev;
+    GUdevClient *client;
     guint16      vendor;
     guint16      product;
     guint16      revision;
@@ -50,11 +51,38 @@ struct _MMKernelDeviceUdevPrivate {
 
 /*****************************************************************************/
 
+static GUdevDevice*
+get_parent (GUdevDevice *device,
+            GUdevClient *client)
+{
+    GUdevDevice *parent;
+    gchar *name, *c;
+
+    parent = g_udev_device_get_parent (device);
+    if (!parent && g_str_equal ( g_udev_device_get_subsystem (device), "net")) {
+        /* Associate VLAN interface with parent interface's parent */
+        name = g_strdup (g_udev_device_get_name (device));
+        if (name && (c = strchr (name, '.'))) {
+            *c = 0;
+            parent = g_udev_client_query_by_subsystem_and_name (client, "net", name);
+            if (parent) {
+                GUdevDevice *tmpdev = parent;
+                parent = g_udev_device_get_parent (tmpdev);
+                g_object_unref (tmpdev);
+            }
+        }
+        g_free(name);
+    }
+
+    return parent;
+}
+
 static gboolean
 get_device_ids (GUdevDevice *device,
                 guint16     *vendor,
                 guint16     *product,
-                guint16     *revision)
+                guint16     *revision,
+                GUdevClient *client)
 {
     GUdevDevice *parent = NULL;
     const gchar *vid = NULL, *pid = NULL, *rid = NULL, *parent_subsys;
@@ -63,7 +91,7 @@ get_device_ids (GUdevDevice *device,
 
     g_assert (vendor != NULL && product != NULL);
 
-    parent = g_udev_device_get_parent (device);
+    parent = get_parent (device, client);
     if (parent) {
         parent_subsys = g_udev_device_get_subsystem (parent);
         if (parent_subsys) {
@@ -92,7 +120,7 @@ get_device_ids (GUdevDevice *device,
                 /* Need to look for vendor/product in the parent of the QMI/MBIM device */
                 GUdevDevice *qmi_parent;
 
-                qmi_parent = g_udev_device_get_parent (parent);
+                qmi_parent = get_parent (parent, client);
                 if (qmi_parent) {
                     vid = g_udev_device_get_property (qmi_parent, "ID_VENDOR_ID");
                     pid = g_udev_device_get_property (qmi_parent, "ID_MODEL_ID");
@@ -176,14 +204,15 @@ ensure_device_ids (MMKernelDeviceUdev *self)
     if (!self->priv->device)
         return;
 
-    if (!get_device_ids (self->priv->device, &self->priv->vendor, &self->priv->product, &self->priv->revision))
+    if (!get_device_ids (self->priv->device, &self->priv->vendor, &self->priv->product, &self->priv->revision, self->priv->client))
         mm_obj_dbg (self, "could not get vendor/product id");
 }
 
 /*****************************************************************************/
 
 static GUdevDevice *
-find_physical_gudevdevice (GUdevDevice *child)
+find_physical_gudevdevice (GUdevDevice *child,
+                           GUdevClient *client)
 {
     GUdevDevice *iter, *old = NULL;
     GUdevDevice *physdev = NULL;
@@ -222,7 +251,7 @@ find_physical_gudevdevice (GUdevDevice *child)
                  * for the base PCMCIA device, not the PCMCIA controller which
                  * is usually PCI or some other bus type.
                  */
-                pcmcia_parent = g_udev_device_get_parent (iter);
+                pcmcia_parent = get_parent (iter, client);
                 if (pcmcia_parent) {
                     tmp_subsys = g_udev_device_get_subsystem (pcmcia_parent);
                     if (tmp_subsys && strcmp (tmp_subsys, "pcmcia"))
@@ -242,7 +271,7 @@ find_physical_gudevdevice (GUdevDevice *child)
         }
 
         old = iter;
-        iter = g_udev_device_get_parent (old);
+        iter = get_parent (old, client);
         g_object_unref (old);
     }
 
@@ -255,7 +284,7 @@ ensure_physdev (MMKernelDeviceUdev *self)
     if (self->priv->physdev)
         return;
     if (self->priv->device)
-        self->priv->physdev = find_physical_gudevdevice (self->priv->device);
+        self->priv->physdev = find_physical_gudevdevice (self->priv->device, self->priv->client);
 }
 
 /*****************************************************************************/
@@ -274,7 +303,7 @@ ensure_interface (MMKernelDeviceUdev *self)
 
     ensure_physdev (self);
 
-    parent = g_udev_device_get_parent (self->priv->device);
+    parent = get_parent (self->priv->device, self->priv->client);
     while (1) {
         /* Abort if no parent found */
         if (!parent)
@@ -350,7 +379,7 @@ kernel_device_get_driver (MMKernelDevice *_self)
     if (!driver) {
         GUdevDevice *parent;
 
-        parent = g_udev_device_get_parent (self->priv->device);
+        parent = get_parent (self->priv->device, self->priv->client);
         if (parent)
             driver = g_udev_device_get_driver (parent);
 
@@ -788,7 +817,8 @@ kernel_device_get_global_property_as_int_hex (MMKernelDevice *_self,
 /*****************************************************************************/
 
 MMKernelDevice *
-mm_kernel_device_udev_new (GUdevDevice *udev_device)
+mm_kernel_device_udev_new (GUdevDevice *udev_device,
+                           GUdevClient *client)
 {
     GError *error = NULL;
     MMKernelDevice *self;
@@ -801,6 +831,7 @@ mm_kernel_device_udev_new (GUdevDevice *udev_device)
                                              "udev-device", udev_device,
                                              NULL));
     g_assert_no_error (error);
+    MM_KERNEL_DEVICE_UDEV(self)->priv->client = client;
     return self;
 }
 
@@ -808,13 +839,18 @@ mm_kernel_device_udev_new (GUdevDevice *udev_device)
 
 MMKernelDevice *
 mm_kernel_device_udev_new_from_properties (MMKernelEventProperties  *props,
+                                           GUdevClient              *client,
                                            GError                  **error)
 {
-    return MM_KERNEL_DEVICE (g_initable_new (MM_TYPE_KERNEL_DEVICE_UDEV,
-                                             NULL,
-                                             error,
-                                             "properties", props,
-                                             NULL));
+    MMKernelDevice *self;
+    self = MM_KERNEL_DEVICE (g_initable_new (MM_TYPE_KERNEL_DEVICE_UDEV,
+                                              NULL,
+                                              error,
+                                              "properties", props,
+                                              NULL));
+
+    MM_KERNEL_DEVICE_UDEV(self)->priv->client = client;
+    return self;
 }
 
 /*****************************************************************************/
