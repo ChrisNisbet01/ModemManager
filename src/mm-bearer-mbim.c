@@ -22,6 +22,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
+#define MM_LOG_NO_OBJECT
 #include <ModemManager.h>
 #define _LIBMM_INSIDE_MM
 #include <libmm-glib.h>
@@ -31,6 +32,7 @@
 #include "mm-port-enums-types.h"
 #include "mm-bearer-mbim.h"
 #include "mm-log-object.h"
+#include "mm-log.h"
 
 G_DEFINE_TYPE (MMBearerMbim, mm_bearer_mbim, MM_TYPE_BASE_BEARER)
 
@@ -50,6 +52,39 @@ struct _MMBearerMbimPrivate {
 };
 
 /*****************************************************************************/
+
+static MMPort*
+peek_data_port_by_session_id(MMBaseModem *modem,
+                            guint32       session_id)
+{
+    GList *l;
+    MMPort *data;
+    const gchar *name, *s;
+    guint64 v;
+
+    /* Return the not-connected data port that is setup to use the session id */
+    for (l = mm_base_modem_peek_data_ports (modem); l; l = g_list_next (l)) {
+        data = (MMPort *)l->data;
+        if (mm_port_get_connected (data) ||
+            mm_port_get_claimed (data) ||
+            mm_port_get_port_type (data) != MM_PORT_TYPE_NET)
+            continue;
+
+        name = mm_port_get_device (data);
+        if (name && (s = strchr (name, '.')) && s[1]) {
+            v = g_ascii_strtoull (s + 1, NULL, 10);
+            if (v == session_id) {
+                mm_dbg ("Bearer with session id %d to use net port %s", session_id, name);
+                return data;
+            }
+        } else if (session_id == 0) {
+            /* Session ID 0 corresponds to the data port with no VLAN number */
+            mm_dbg ("Bearer with session id %d to use net port %s", session_id, name);
+            return data;
+        }
+    }
+    return NULL;
+}
 
 static gboolean
 peek_ports (gpointer self,
@@ -88,7 +123,7 @@ peek_ports (gpointer self,
         MMPort *port;
 
         /* Grab a data port */
-        port = mm_base_modem_peek_best_data_port (modem, MM_PORT_TYPE_NET);
+        port = peek_data_port_by_session_id (modem, MM_BEARER_MBIM(self)->priv->session_id);
         if (!port) {
             g_task_report_new_error (self,
                                      callback,

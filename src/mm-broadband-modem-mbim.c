@@ -1894,12 +1894,21 @@ modem_create_bearer (MMIfaceModem *_self,
     MMBroadbandModemMbim *self = MM_BROADBAND_MODEM_MBIM (_self);
     MMBaseBearer *bearer;
     GTask *task;
-    gint session_id;
+    gint session_id = -1;
+    const gchar *number;
 
     task = g_task_new (self, NULL, callback, user_data);
 
+    number = mm_bearer_properties_get_number (properties);
+    if (number && *number) {
+        session_id = g_ascii_strtoull (number, NULL, 10);
+        if (session_id > 255)
+            session_id = -1;
+    }
+    if (session_id < 0) {
     /* Find a new session ID */
     session_id = find_next_bearer_session_id (self);
+    }
     if (session_id < 0) {
         g_task_return_new_error (task,
                                  MM_CORE_ERROR,
