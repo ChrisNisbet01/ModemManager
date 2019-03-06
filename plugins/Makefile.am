@@ -400,6 +400,12 @@ libmm_shared_telit_la_SOURCES += \
 	telit/mm-broadband-modem-mbim-telit.c \
 	$(NULL)
 endif
+if WITH_QMI
+libmm_shared_telit_la_SOURCES += \
+	telit/mm-broadband-modem-qmi-telit.h \
+	telit/mm-broadband-modem-qmi-telit.c \
+	$(NULL)
+endif
 
 libmm_shared_telit_la_CPPFLAGS = \
 	-I$(top_srcdir)/plugins/telit \

@@ -30,7 +30,7 @@
 
 
 #if defined WITH_QMI
-# include "mm-broadband-modem-qmi.h"
+# include "mm-broadband-modem-qmi-telit.h"
 #endif
 
 #if defined WITH_MBIM
@@ -56,7 +56,7 @@ create_modem (MMPlugin *self,
 #if defined WITH_QMI
     if (mm_port_probe_list_has_qmi_port (probes)) {
         mm_obj_dbg (self, "QMI-powered Telit modem found...");
-        return MM_BASE_MODEM (mm_broadband_modem_qmi_new (uid,
+        return MM_BASE_MODEM (mm_broadband_modem_qmi_telit_new (uid,
                                                           drivers,
                                                           mm_plugin_get_name (self),
                                                           vendor,
