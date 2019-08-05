@@ -38,11 +38,9 @@ G_DEFINE_TYPE (MMBearerProperties, mm_bearer_properties, G_TYPE_OBJECT);
 #define PROPERTY_USER            "user"
 #define PROPERTY_PASSWORD        "password"
 #define PROPERTY_IP_TYPE         "ip-type"
+#define PROPERTY_NUMBER          "number"
 #define PROPERTY_ALLOW_ROAMING   "allow-roaming"
 #define PROPERTY_RM_PROTOCOL     "rm-protocol"
-
-/* no longer used properties */
-#define DEPRECATED_PROPERTY_NUMBER "number"
 
 struct _MMBearerPropertiesPrivate {
     /* APN */
@@ -51,6 +49,8 @@ struct _MMBearerPropertiesPrivate {
     MMBearerIpFamily ip_type;
     /* Allowed auth */
     MMBearerAllowedAuth allowed_auth;
+    /* Number */
+    gchar *number;
     /* User */
     gchar *user;
     /* Password */
@@ -303,8 +303,6 @@ mm_bearer_properties_get_allow_roaming (MMBearerProperties *self)
 
 /*****************************************************************************/
 
-#ifndef MM_DISABLE_DEPRECATED
-
 /**
  * mm_bearer_properties_set_number:
  * @self: a #MMBearerProperties.
@@ -322,7 +320,8 @@ mm_bearer_properties_set_number (MMBearerProperties *self,
 {
     g_return_if_fail (MM_IS_BEARER_PROPERTIES (self));
 
-    /* NO-OP */
+    g_free (self->priv->number);
+    self->priv->number = g_strdup (number);
 }
 
 /**
@@ -343,11 +342,8 @@ mm_bearer_properties_get_number (MMBearerProperties *self)
 {
     g_return_val_if_fail (MM_IS_BEARER_PROPERTIES (self), NULL);
 
-    /* NO-OP */
-    return NULL;
+    return self->priv->number;
 }
-
-#endif /* MM_DISABLE_DEPRECATED */
 
 /*****************************************************************************/
 
@@ -435,6 +431,12 @@ mm_bearer_properties_get_dictionary (MMBearerProperties *self)
                                PROPERTY_IP_TYPE,
                                g_variant_new_uint32 (self->priv->ip_type));
 
+    if (self->priv->number)
+        g_variant_builder_add (&builder,
+                               "{sv}",
+                               PROPERTY_NUMBER,
+                               g_variant_new_string (self->priv->number));
+
     if (self->priv->allow_roaming_set)
         g_variant_builder_add (&builder,
                                "{sv}",
@@ -499,7 +501,9 @@ mm_bearer_properties_consume_string (MMBearerProperties *self,
             return FALSE;
         }
         mm_bearer_properties_set_allow_roaming (self, allow_roaming);
-    } else if (g_str_equal (key, PROPERTY_RM_PROTOCOL)) {
+    } else if (g_str_equal (key, PROPERTY_NUMBER))
+        mm_bearer_properties_set_number (self, value);
+    else if (g_str_equal (key, PROPERTY_RM_PROTOCOL)) {
         GError *inner_error = NULL;
         MMModemCdmaRmProtocol protocol;
 
@@ -509,8 +513,6 @@ mm_bearer_properties_consume_string (MMBearerProperties *self,
             return FALSE;
         }
         mm_bearer_properties_set_rm_protocol (self, protocol);
-    } else if (g_str_equal (key, DEPRECATED_PROPERTY_NUMBER)) {
-        /* NO-OP */
     } else {
         g_set_error (error,
                      MM_CORE_ERROR,
@@ -598,13 +600,15 @@ mm_bearer_properties_consume_variant (MMBearerProperties *properties,
         mm_bearer_properties_set_ip_type (
             properties,
             g_variant_get_uint32 (value));
+    else if (g_str_equal (key, PROPERTY_NUMBER))
+        mm_bearer_properties_set_number (
+            properties,
+            g_variant_get_string (value, NULL));
     else if (g_str_equal (key, PROPERTY_ALLOW_ROAMING))
         mm_bearer_properties_set_allow_roaming (
             properties,
             g_variant_get_boolean (value));
-    else if (g_str_equal (key, DEPRECATED_PROPERTY_NUMBER)) {
-        /* NO-OP */
-    } else {
+    else {
         /* Set error */
         g_set_error (error,
                      MM_CORE_ERROR,
@@ -676,6 +680,7 @@ mm_bearer_properties_cmp (MMBearerProperties *a,
 {
     return ((!g_strcmp0 (a->priv->apn, b->priv->apn)) &&
             (a->priv->ip_type == b->priv->ip_type) &&
+            (!g_strcmp0 (a->priv->number, b->priv->number)) &&
             (a->priv->allowed_auth == b->priv->allowed_auth) &&
             (!g_strcmp0 (a->priv->user, b->priv->user)) &&
             (!g_strcmp0 (a->priv->password, b->priv->password)) &&
@@ -724,6 +729,7 @@ finalize (GObject *object)
     g_free (self->priv->apn);
     g_free (self->priv->user);
     g_free (self->priv->password);
+    g_free (self->priv->number);
 
     G_OBJECT_CLASS (mm_bearer_properties_parent_class)->finalize (object);
 }
