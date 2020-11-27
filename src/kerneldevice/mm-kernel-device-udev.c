@@ -45,6 +45,7 @@ struct _MMKernelDeviceUdevPrivate {
     guint16      vendor;
     guint16      product;
     guint16      revision;
+    gchar        *driver;
 
     MMKernelEventProperties *properties;
 };
@@ -367,6 +368,7 @@ kernel_device_get_driver (MMKernelDevice *_self)
 {
     MMKernelDeviceUdev *self;
     const gchar *driver, *subsys, *name;
+    GUdevDevice *parent = NULL;
 
     g_return_val_if_fail (MM_IS_KERNEL_DEVICE_UDEV (_self), NULL);
 
@@ -375,10 +377,12 @@ kernel_device_get_driver (MMKernelDevice *_self)
     if (!self->priv->device)
         return NULL;
 
+    /* Use cached driver if already set */
+    if (self->priv->driver)
+        return self->priv->driver;
+
     driver = g_udev_device_get_driver (self->priv->device);
     if (!driver) {
-        GUdevDevice *parent;
-
         parent = get_parent (self->priv->device, self->priv->client);
         if (parent)
             driver = g_udev_device_get_driver (parent);
@@ -391,9 +395,6 @@ kernel_device_get_driver (MMKernelDevice *_self)
             if (subsys && !strcmp (subsys, "bluetooth"))
                 driver = "bluetooth";
         }
-
-        if (parent)
-            g_object_unref (parent);
     }
 
     /* Newer kernels don't set up the rfcomm port parent in sysfs,
@@ -403,8 +404,15 @@ kernel_device_get_driver (MMKernelDevice *_self)
     if (!driver && strncmp (name, "rfcomm", 6) == 0)
         driver = "bluetooth";
 
+    /* Cache driver if found */
+    if (driver)
+        self->priv->driver = g_strdup (driver);
+
+    if (parent)
+        g_object_unref (parent);
+
     /* Note: may return NULL! */
-    return driver;
+    return self->priv->driver;
 }
 
 static const gchar *
@@ -973,6 +981,7 @@ dispose (GObject *object)
     g_clear_object (&self->priv->interface);
     g_clear_object (&self->priv->device);
     g_clear_object (&self->priv->properties);
+    g_clear_pointer (&self->priv->driver, g_free);
 
     G_OBJECT_CLASS (mm_kernel_device_udev_parent_class)->dispose (object);
 }
