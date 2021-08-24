@@ -98,6 +98,9 @@ struct _MMBroadbandModemHuaweiPrivate {
     /* Regex for access-technology related notifications */
     GRegex *mode_regex;
 
+    /* Regex for active band related notifications */
+    GRegex *band_regex;
+
     /* Regex for connection status related notifications */
     GRegex *dsflowrpt_regex;
     GRegex *ndisstat_regex;
@@ -146,6 +149,7 @@ struct _MMBroadbandModemHuaweiPrivate {
     GArray *syscfg_supported_modes;
     GArray *syscfgex_supported_modes;
     GArray *prefmode_supported_modes;
+    GArray *active_bands;
 
     DetailedSignal detailed_signal;
 
@@ -743,6 +747,9 @@ typedef struct {
 } BandTable;
 
 static BandTable bands[] = {
+    /* Prefer 4G */
+    { MM_MODEM_BAND_EUTRAN_4,  0x00000008 },
+    { MM_MODEM_BAND_EUTRAN_13, 0x00001000 },
     /* Sort 3G first since it's preferred */
     { MM_MODEM_BAND_UTRAN_1, 0x00400000 },
     { MM_MODEM_BAND_UTRAN_2, 0x00800000 },
@@ -840,6 +847,104 @@ parse_syscfg (const gchar *response,
     return TRUE;
 }
 
+static gboolean
+parse_syscfgex (const gchar *response,
+              GArray **bands_array,
+              GError **error)
+{
+    GArray *ltebands_array;
+    gint acquisition_order;
+    guint32 band;
+    gint roaming;
+    gint srv_domain;
+    guint32 lteband;
+    gint i;
+
+    if (!response ||
+        strncmp (response, "^SYSCFGEX: ", 11) != 0 ||
+        sscanf (response + 11, "\"%d\",%x,%d,%d,%x", &acquisition_order, &band, &roaming, &srv_domain, &lteband) != 5) {
+        /* Dump error to upper layer */
+        g_set_error (error,
+                     MM_CORE_ERROR,
+                     MM_CORE_ERROR_FAILED,
+                     "Unexpected SYSCFGEX response: '%s'",
+                     response);
+        return FALSE;
+    }
+
+    /* Band */
+    if (bands_array &&
+        !huawei_to_bands_array (band, bands_array, error))
+        return FALSE;
+
+    /* LTE Band */
+    if (!huawei_to_bands_array (lteband, &ltebands_array, error)) {
+        g_array_free(ltebands_array, TRUE);
+        return FALSE;
+    }
+
+    for (i = 0; i < ltebands_array->len; ++i) {
+        g_array_append_val((*bands_array), g_array_index(ltebands_array, guint32, i));
+    }
+    g_array_free(ltebands_array, TRUE);
+
+    return TRUE;
+}
+
+/*****************************************************************************/
+/* Load supported bands (Modem interface) */
+
+static GArray *
+load_supported_bands_finish (MMIfaceModem *self,
+                            GAsyncResult *res,
+                            GError **error)
+{
+    MMBroadbandModemHuawei *_self = MM_BROADBAND_MODEM_HUAWEI (self);
+    const gchar *response = NULL;
+    GArray *bands_array = NULL;
+
+    response = mm_base_modem_at_command_finish (MM_BASE_MODEM (self), res, error);
+    if (!response)
+        return NULL;
+
+    if (_self->priv->syscfg_support == FEATURE_SUPPORTED) {
+       if (!parse_syscfg (response, &bands_array, error))
+            return NULL;
+    } else if (_self->priv->syscfgex_support == FEATURE_SUPPORTED) {
+        if (!parse_syscfgex (response, &bands_array, error)) {
+           mm_obj_dbg(self, "Failed parsing syscfgex: %s", response);
+            return NULL;
+       }
+    }
+
+    return bands_array;
+}
+
+static void
+load_supported_bands (MMIfaceModem *self,
+                    GAsyncReadyCallback callback,
+                    gpointer user_data)
+{
+    MMBroadbandModemHuawei *_self = MM_BROADBAND_MODEM_HUAWEI (self);
+
+    mm_obj_dbg (self, "loading supported bands (huawei)...");
+    if (_self->priv->syscfg_support == FEATURE_SUPPORTED) {
+        mm_base_modem_at_command (MM_BASE_MODEM (self),
+                              "^SYSCFG?",
+                              3,
+                              FALSE,
+                              callback,
+                              user_data);
+    } else if (_self->priv->syscfgex_support == FEATURE_SUPPORTED) {
+        mm_base_modem_at_command (MM_BASE_MODEM (self),
+                              "^SYSCFGEX?",
+                              3,
+                              FALSE,
+                              callback,
+                              user_data);
+     }
+}
+
 /*****************************************************************************/
 /* Load current bands (Modem interface) */
 
@@ -848,17 +953,29 @@ load_current_bands_finish (MMIfaceModem *self,
                            GAsyncResult *res,
                            GError **error)
 {
+    MMBroadbandModemHuawei *_self = MM_BROADBAND_MODEM_HUAWEI (self);
+    guint32 band;
     const gchar *response;
-    GArray *bands_array = NULL;
 
     response = mm_base_modem_at_command_finish (MM_BASE_MODEM (self), res, error);
     if (!response)
-        return NULL;
+        return _self->priv->active_bands;
 
-    if (!parse_syscfg (response, &bands_array, error))
-        return NULL;
+    if (strstr(response, "ERROR") != NULL)
+        return _self->priv->active_bands;
 
-    return bands_array;
+    if (sscanf(response, "%x", &band) != 1)
+        return _self->priv->active_bands;
+
+    if (!huawei_to_bands_array (band, &_self->priv->active_bands, error)) {
+       if (_self->priv->active_bands->len == 0) {
+            band = MM_MODEM_BAND_UNKNOWN;
+           g_array_append_val(_self->priv->active_bands, band);
+        }
+        return _self->priv->active_bands;
+    }
+
+    return _self->priv->active_bands;
 }
 
 static void
@@ -866,8 +983,9 @@ load_current_bands (MMIfaceModem *self,
                     GAsyncReadyCallback callback,
                     gpointer user_data)
 {
+    /* Only some Huawei modems support this, the ME209 does not report current band. */
     mm_base_modem_at_command (MM_BASE_MODEM (self),
-                              "^SYSCFG?",
+                              "^ACTIVEBAND?",
                               3,
                               FALSE,
                               callback,
@@ -1275,6 +1393,11 @@ load_current_modes (MMIfaceModem *_self,
     GTask *task;
 
     task = g_task_new (self, NULL, callback, user_data);
+    mm_obj_dbg (self, "OG: load_current_modes(): supported:%s%s%s",
+        self->priv->syscfg_support == FEATURE_SUPPORTED ? " ^syscfg" : "",
+        self->priv->syscfgex_support == FEATURE_SUPPORTED ? " ^syscfgex" : "",
+        self->priv->prefmode_support == FEATURE_SUPPORTED ? " ^prefmode" : ""
+    );
 
     if (self->priv->syscfgex_support == FEATURE_SUPPORTED) {
         g_assert (self->priv->syscfgex_supported_modes != NULL);
@@ -1621,6 +1744,31 @@ huawei_mode_changed (MMPortSerialAt *port,
 }
 
 static void
+huawei_band_changed (MMPortSerialAt *port,
+                       GMatchInfo *match_info,
+                       MMBroadbandModemHuawei *self)
+{
+    gchar *str;
+    GError *error;
+    MMModemBand band = MM_MODEM_BAND_UNKNOWN;
+
+    str = g_match_info_fetch (match_info, 1);
+    if (sscanf(str, "%x", &band) != 1)
+           band = MM_MODEM_BAND_UNKNOWN;
+
+    if (self->priv->active_bands != NULL)
+        g_array_remove_range(self->priv->active_bands, 0, self->priv->active_bands->len);
+
+    if (!huawei_to_bands_array (band, &self->priv->active_bands, &error))
+        mm_obj_dbg (self, "Failed to parse ^ACTIVEBAND output");
+
+    if (self->priv->active_bands->len == 0)
+        g_array_append_val(self->priv->active_bands, band);
+
+    g_free (str);
+}
+
+static void
 huawei_status_changed (MMPortSerialAt *port,
                        GMatchInfo *match_info,
                        MMBroadbandModemHuawei *self)
@@ -1862,6 +2010,14 @@ set_3gpp_unsolicited_events_handlers (MMBroadbandModemHuawei *self,
             port,
             self->priv->mode_regex,
             enable ? (MMPortSerialAtUnsolicitedMsgFn)huawei_mode_changed : NULL,
+            enable ? self : NULL,
+            NULL);
+
+        /* Active band related */
+        mm_port_serial_at_add_unsolicited_msg_handler (
+            port,
+            self->priv->band_regex,
+            enable ? (MMPortSerialAtUnsolicitedMsgFn)huawei_band_changed : NULL,
             enable ? self : NULL,
             NULL);
 
@@ -4492,6 +4648,8 @@ mm_broadband_modem_huawei_init (MMBroadbandModemHuawei *self)
      */
     self->priv->mode_regex = g_regex_new ("\\r\\n\\^MODE:\\s*(\\d*),?(\\d*)\\r+\\n",
                                           G_REGEX_RAW | G_REGEX_OPTIMIZE, 0, NULL);
+    self->priv->band_regex = g_regex_new ("\\r\\n\\^ACTIVEBAND:\\s*(\\d*)\\r+\\n",
+                                          G_REGEX_RAW | G_REGEX_OPTIMIZE, 0, NULL);
     self->priv->dsflowrpt_regex = g_regex_new ("\\r\\n\\^DSFLOWRPT:(.+)\\r\\n",
                                                G_REGEX_RAW | G_REGEX_OPTIMIZE, 0, NULL);
     self->priv->ndisstat_regex = g_regex_new ("\\r\\n(\\^NDISSTAT:.+)\\r+\\n",
@@ -4558,6 +4716,8 @@ mm_broadband_modem_huawei_init (MMBroadbandModemHuawei *self)
     self->priv->nwtime_support = FEATURE_SUPPORT_UNKNOWN;
     self->priv->time_support = FEATURE_SUPPORT_UNKNOWN;
     self->priv->cvoice_support = FEATURE_SUPPORT_UNKNOWN;
+
+    self->priv->active_bands = NULL;
 }
 
 static void
@@ -4579,6 +4739,7 @@ finalize (GObject *object)
     g_regex_unref (self->priv->rssilvl_regex);
     g_regex_unref (self->priv->hrssilvl_regex);
     g_regex_unref (self->priv->mode_regex);
+    g_regex_unref (self->priv->band_regex);
     g_regex_unref (self->priv->dsflowrpt_regex);
     g_regex_unref (self->priv->ndisstat_regex);
     g_regex_unref (self->priv->orig_regex);
@@ -4615,6 +4776,9 @@ finalize (GObject *object)
     if (self->priv->prefmode_supported_modes)
         g_array_unref (self->priv->prefmode_supported_modes);
 
+    if (self->priv->active_bands)
+        g_array_unref (self->priv->active_bands);
+
     G_OBJECT_CLASS (mm_broadband_modem_huawei_parent_class)->finalize (object);
 }
 
@@ -4631,6 +4795,8 @@ iface_modem_init (MMIfaceModem *iface)
     iface->load_unlock_retries_finish = load_unlock_retries_finish;
     iface->modem_after_sim_unlock = modem_after_sim_unlock;
     iface->modem_after_sim_unlock_finish = modem_after_sim_unlock_finish;
+    iface->load_supported_bands = load_supported_bands;
+    iface->load_supported_bands_finish = load_supported_bands_finish;
     iface->load_current_bands = load_current_bands;
     iface->load_current_bands_finish = load_current_bands_finish;
     iface->set_current_bands = set_current_bands;
