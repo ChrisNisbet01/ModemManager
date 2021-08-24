@@ -1821,19 +1821,6 @@ _connect (MMBaseBearer *_self,
         goto out;
     }
 
-    /* Is this a 3GPP2 only modem and APN was given? If so, error */
-    if (mm_iface_modem_is_cdma_only (MM_IFACE_MODEM (modem)) && apn) {
-        g_task_report_new_error (
-            self,
-            callback,
-            user_data,
-            _connect,
-            MM_CORE_ERROR,
-            MM_CORE_ERROR_INVALID_ARGS,
-            "3GPP2 doesn't support APN setting");
-        goto out;
-    }
-
     mm_obj_dbg (self, "launching connection with QMI port (%s) and data port (%s)",
                 mm_port_get_device (MM_PORT (qmi)),
                 mm_port_get_device (data));

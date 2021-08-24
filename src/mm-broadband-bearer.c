@@ -1299,20 +1299,6 @@ connect (MMBaseBearer *self,
         return;
     }
 
-    /* Is this a 3GPP2 only modem and APN was given? If so, error */
-    if (mm_iface_modem_is_cdma_only (MM_IFACE_MODEM (modem)) && apn) {
-        g_task_report_new_error (
-            self,
-            callback,
-            user_data,
-            connect,
-            MM_CORE_ERROR,
-            MM_CORE_ERROR_INVALID_ARGS,
-            "3GPP2 doesn't support APN setting");
-        g_object_unref (modem);
-        return;
-    }
-
     /* In this context, we only keep the stuff we'll need later */
     task = g_task_new (self, cancellable, callback, user_data);
 
@@ -1332,7 +1318,7 @@ connect (MMBaseBearer *self,
     }
 
     /* Otherwise, launch CDMA-specific connection. */
-    if (mm_iface_modem_is_cdma (MM_IFACE_MODEM (modem)) && !apn) {
+    if (mm_iface_modem_is_cdma (MM_IFACE_MODEM (modem))) {
         mm_obj_dbg (self, "launching 3GPP2 connection attempt");
         MM_BROADBAND_BEARER_GET_CLASS (self)->connect_cdma (
             MM_BROADBAND_BEARER (self),
