@@ -355,15 +355,6 @@ connect_3gpp_context_step (GTask *task)
             g_free (ip_family_str);
         }
 
-        if (ip_family != MM_BEARER_IP_FAMILY_IPV4) {
-            g_task_return_new_error (task,
-                                     MM_CORE_ERROR,
-                                     MM_CORE_ERROR_UNSUPPORTED,
-                                     "Only IPv4 is supported by this modem");
-            g_object_unref (task);
-            return;
-        }
-
         /* Store the task */
         self->priv->connect_pending = task;
 
