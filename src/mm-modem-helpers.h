@@ -347,6 +347,7 @@ typedef struct {
     gint index;
     gint status;
     gchar *pdu;
+    gboolean is_huawei_sms; /* AT^HCMGR */
 } MM3gppPduInfo;
 void   mm_3gpp_pdu_info_free           (MM3gppPduInfo *info);
 void   mm_3gpp_pdu_info_list_free      (GList *info_list);

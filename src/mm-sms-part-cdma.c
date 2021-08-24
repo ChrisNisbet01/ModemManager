@@ -861,6 +861,7 @@ read_bearer_data_user_data (MMSmsPart              *sms_part,
     }
 
     case ENCODING_LATIN: {
+        GError *error = NULL;
         gchar *latin;
         gchar *text;
         guint i;

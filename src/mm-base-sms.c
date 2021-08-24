@@ -26,10 +26,12 @@
 #define _LIBMM_INSIDE_MM
 #include <libmm-glib.h>
 
+#define MM_LOG_NO_OBJECT        /* for mm_dbg() */
 #include "mm-base-sms.h"
 #include "mm-broadband-modem.h"
 #include "mm-iface-modem.h"
 #include "mm-iface-modem-messaging.h"
+#include "mm-sms-part-cdma.h"
 #include "mm-sms-part-3gpp.h"
 #include "mm-base-modem-at.h"
 #include "mm-base-modem.h"
@@ -297,6 +299,7 @@ generate_submit_pdus (MMBaseSms *self,
 {
     MMBaseModem *modem;
     gboolean is_3gpp;
+    gboolean is_huawei_sms;
 
     /* First; decide which kind of PDU we'll generate, based on the current modem caps */
 
@@ -306,10 +309,12 @@ generate_submit_pdus (MMBaseSms *self,
     g_assert (modem != NULL);
 
     is_3gpp = mm_iface_modem_is_3gpp (MM_IFACE_MODEM (modem));
+    is_huawei_sms = mm_iface_modem_is_huawei_sms (MM_IFACE_MODEM (modem));
     g_object_unref (modem);
 
     /* On a 3GPP-capable modem, create always a 3GPP SMS (even if the modem is 3GPP+3GPP2) */
     if (is_3gpp)
+      if (!is_huawei_sms)       /* Unless device forces 3GPP2/CDMA messaging */
         return generate_3gpp_submit_pdus (self, error);
 
     /* Otherwise, create a 3GPP2 SMS */
@@ -775,6 +780,7 @@ sms_get_store_or_send_command (MMBaseSms  *self,
                                MMSmsPart  *part,
                                gboolean    text_or_pdu,   /* TRUE for PDU */
                                gboolean    store_or_send, /* TRUE for send */
+                               gboolean    is_huawei_sms,
                                gchar     **out_cmd,
                                gchar     **out_msg_data,
                                GError    **error)
@@ -784,9 +790,15 @@ sms_get_store_or_send_command (MMBaseSms  *self,
 
     if (!text_or_pdu) {
         /* Text mode */
+      if (is_huawei_sms) {
+        *out_cmd = g_strdup_printf ("^HCMG%c=\"%s\"",
+                                    store_or_send ? 'S' : 'W',
+                                    mm_sms_part_get_number (part));
+      } else {
         *out_cmd = g_strdup_printf ("+CMG%c=\"%s\"",
                                     store_or_send ? 'S' : 'W',
                                     mm_sms_part_get_number (part));
+      }
         *out_msg_data = g_strdup_printf ("%s\x1a", mm_sms_part_get_text (part));
     } else {
         guint8 *pdu;
@@ -814,9 +826,15 @@ sms_get_store_or_send_command (MMBaseSms  *self,
         }
 
         /* CMGW/S length is the size of the PDU without SMSC information */
+      if (is_huawei_sms) {
+        *out_cmd = g_strdup_printf ("^HCMG%c=%d",
+                                     store_or_send ? 'S' : 'W',
+                                     pdulen - msgstart);
+      } else {
         *out_cmd = g_strdup_printf ("+CMG%c=%d",
                                     store_or_send ? 'S' : 'W',
                                     pdulen - msgstart);
+      }
         *out_msg_data = g_strdup_printf ("%s\x1a", hex);
         g_free (hex);
     }
@@ -947,10 +965,12 @@ sms_store_next_part (GTask *task)
 
     g_clear_pointer (&ctx->msg_data, g_free);
 
+    gboolean is_huawei_sms = mm_iface_modem_is_huawei_sms (MM_IFACE_MODEM (ctx->modem));
     if (!sms_get_store_or_send_command (self,
                                         (MMSmsPart *)ctx->current->data,
                                         ctx->use_pdu_mode,
                                         FALSE,
+                                        is_huawei_sms,
                                         &cmd,
                                         &ctx->msg_data,
                                         &error)) {
@@ -1074,6 +1094,19 @@ read_message_reference_from_reply (const gchar *response,
         rv = sscanf (strstr (response, "+CMGS"), "+CMGS: %d", &idx);
     else if (strstr (response, "+CMSS"))
         rv = sscanf (strstr (response, "+CMSS"), "+CMSS: %d", &idx);
+    else if (strstr (response, "^HCMGS"))
+        rv = sscanf (strstr (response, "^HCMGS"), "^HCMGS:%d", &idx);
+    else if (strlen(response) == 0) {
+        /*
+         * read_message_reference_from_reply(): response: ''
+         * _close_internal(): (ttyUSB0) device open count is 1 (close)
+         * debug_log(): (ttyUSB2): <-- '<CR><LF>^HCMGS:0<CR><LF>'
+         * debug_log(): (ttyUSB0): <-- '<CR><LF>^HCMGS:0<CR><LF>'
+         */
+        mm_dbg("No response read from modem, this needs investigation");
+        idx = 0;
+        rv = 1;
+    }
 
     if (rv != 1 || idx < 0) {
         g_set_error (error,
@@ -1231,10 +1264,12 @@ sms_send_next_part (GTask *task)
 
     g_clear_pointer (&ctx->msg_data, g_free);
 
+    gboolean is_huawei_sms = mm_iface_modem_is_huawei_sms (MM_IFACE_MODEM (ctx->modem));
     if (!sms_get_store_or_send_command (self,
                                         (MMSmsPart *)ctx->current->data,
                                         ctx->use_pdu_mode,
                                         TRUE,
+                                        is_huawei_sms,
                                         &cmd,
                                         &ctx->msg_data,
                                         &error)) {
@@ -1403,8 +1438,14 @@ delete_next_part (GTask *task)
         return;
     }
 
+  gboolean is_huawei_sms = mm_iface_modem_is_huawei_sms (MM_IFACE_MODEM (ctx->modem));
+  if (is_huawei_sms) {
+    cmd = g_strdup_printf ("^HCMGD=%d",
+                           mm_sms_part_get_index ((MMSmsPart *)ctx->current->data));
+  } else {
     cmd = g_strdup_printf ("+CMGD=%d",
                            mm_sms_part_get_index ((MMSmsPart *)ctx->current->data));
+  }
     mm_base_modem_at_command (ctx->modem,
                               cmd,
                               10,
@@ -1463,6 +1504,7 @@ sms_delete (MMBaseSms *self,
     }
 
     /* Select specific storage to delete from */
+    mm_obj_dbg (self, "storage type for sms is: %d", mm_base_sms_get_storage(self));
     mm_broadband_modem_lock_sms_storages (
         MM_BROADBAND_MODEM (self->priv->modem),
         mm_base_sms_get_storage (self),

@@ -6365,11 +6365,13 @@ modem_messaging_load_supported_storages (MMIfaceModemMessaging *self,
                                          gpointer user_data)
 {
     GTask *task;
+    gboolean is_huawei_sms = mm_iface_modem_is_huawei_sms (MM_IFACE_MODEM(self));
 
     task = g_task_new (self, NULL, callback, user_data);
 
     /* Check support storages */
     mm_base_modem_at_command (MM_BASE_MODEM (self),
+              is_huawei_sms ? "^HCPMS=?" :
                               "+CPMS=?",
                               3,
                               TRUE,
@@ -6611,10 +6613,20 @@ mm_broadband_modem_lock_sms_storages (MMBroadbandModem *self,
     mm_obj_dbg (self, "locking SMS storages to: mem1 (%s), mem2 (%s)...",
                 mem1_str, mem2_str ? mem2_str : "none");
 
+    gboolean is_huawei_sms = mm_iface_modem_is_huawei_sms (MM_IFACE_MODEM(self));
+
     if (mem2_str)
+      if (is_huawei_sms) {
+        cmd = g_strdup_printf ("^HCPMS=\"%s\",\"%s\"", mem1_str, mem2_str);
+      } else {
         cmd = g_strdup_printf ("+CPMS=\"%s\",\"%s\"", mem1_str, mem2_str);
+      }
     else
+      if (is_huawei_sms) {
+        cmd = g_strdup_printf ("^HCPMS=\"%s\"", mem1_str);
+      } else {
         cmd = g_strdup_printf ("+CPMS=\"%s\"", mem1_str);
+      }
 
     mm_base_modem_at_command (MM_BASE_MODEM (self),
                               cmd,
@@ -6683,7 +6695,12 @@ modem_messaging_set_default_storage (MMIfaceModemMessaging *_self,
     mem1_str = g_ascii_strup (mm_sms_storage_get_string (self->priv->current_sms_mem1_storage), -1);
     mem_str = g_ascii_strup (mm_sms_storage_get_string (storage), -1);
 
+  gboolean is_huawei_sms = mm_iface_modem_is_huawei_sms (MM_IFACE_MODEM(self));
+  if (is_huawei_sms) {
+    cmd = g_strdup_printf ("^HCPMS=\"\",\"%s\",\"%s\"", mem_str, mem_str);
+  } else {
     cmd = g_strdup_printf ("+CPMS=\"%s\",\"%s\",\"%s\"", mem1_str, mem_str, mem_str);
+  }
 
     task = g_task_new (self, NULL, callback, user_data);
 
@@ -6820,6 +6837,7 @@ modem_messaging_setup_cleanup_unsolicited_events_finish (MMIfaceModemMessaging *
 
 typedef struct {
     guint idx;
+    MMSmsStorage storage;
 } SmsPartContext;
 
 static void
@@ -6856,13 +6874,19 @@ sms_part_ready (MMBroadbandModem *self,
         return;
     }
 
+  if (info->is_huawei_sms) {
+    part = mm_sms_part_cdma_new_from_pdu (info->index, info->pdu, self, &error);
+  } else {
     part = mm_sms_part_3gpp_new_from_pdu (info->index, info->pdu, self, &error);
+  }
     if (part) {
         mm_obj_dbg (self, "correctly parsed PDU (%d)", ctx->idx);
+        mm_obj_dbg (self, "with storage type (%d) default is (%d)",
+                ctx->storage, self->priv->modem_messaging_sms_default_storage);
         mm_iface_modem_messaging_take_part (MM_IFACE_MODEM_MESSAGING (self),
                                             part,
                                             MM_SMS_STATE_RECEIVED,
-                                            self->priv->modem_messaging_sms_default_storage);
+                                            ctx->storage);
     } else {
         /* Don't treat the error as critical */
         mm_obj_dbg (self, "error parsing PDU (%d): %s", ctx->idx, error->message);
@@ -6893,10 +6917,16 @@ indication_lock_storages_ready (MMBroadbandModem *self,
     }
 
     /* Storage now set and locked */
+    mm_obj_dbg(self, "Reading message %d from storage: %d", ctx->idx, ctx->storage);
 
     /* Retrieve the message */
     ctx = g_task_get_task_data (task);
+  gboolean is_huawei_sms = mm_iface_modem_is_huawei_sms (MM_IFACE_MODEM(self));
+  if (is_huawei_sms) {
+    command = g_strdup_printf ("^HCMGR=%d", ctx->idx);
+  } else {
     command = g_strdup_printf ("+CMGR=%d", ctx->idx);
+  }
     mm_base_modem_at_command (MM_BASE_MODEM (self),
                               command,
                               10,
@@ -6938,8 +6968,10 @@ cmti_received (MMPortSerialAt *port,
         return;
     }
 
+    mm_obj_dbg (self, "Remeber PDU (%d) storage type (%d)", idx, storage);
     ctx = g_new (SmsPartContext, 1);
     ctx->idx = idx;
+    ctx->storage = storage;
 
     task = g_task_new (self, NULL, NULL, NULL);
     g_task_set_task_data (task, ctx, g_free);
@@ -6971,7 +7003,12 @@ cds_received (MMPortSerialAt *port,
     if (!pdu)
         return;
 
+  gboolean is_huawei_sms = mm_iface_modem_is_huawei_sms (MM_IFACE_MODEM(self));
+  if (is_huawei_sms) {
+    part = mm_sms_part_cdma_new_from_pdu (SMS_PART_INVALID_INDEX, pdu, self, &error);
+  } else {
     part = mm_sms_part_3gpp_new_from_pdu (SMS_PART_INVALID_INDEX, pdu, self, &error);
+  }
     if (part) {
         mm_obj_dbg (self, "correctly parsed non-stored PDU");
         mm_iface_modem_messaging_take_part (MM_IFACE_MODEM_MESSAGING (self),
@@ -6996,6 +7033,9 @@ set_messaging_unsolicited_events_handlers (MMIfaceModemMessaging *self,
     GRegex *cds_regex;
     guint i;
     GTask *task;
+    const gchar *model;
+
+    model = mm_iface_modem_get_model (MM_IFACE_MODEM (self));
 
     cmti_regex = mm_3gpp_cmti_regex_get ();
     cds_regex = mm_3gpp_cds_regex_get ();
@@ -7396,12 +7436,17 @@ sms_pdu_part_list_ready (MMBroadbandModem *self,
     }
 
     ctx = g_task_get_task_data (task);
+    gboolean is_huawei_sms = mm_iface_modem_is_huawei_sms (MM_IFACE_MODEM(self));
 
     for (l = info_list; l; l = g_list_next (l)) {
         MM3gppPduInfo *info = l->data;
         MMSmsPart *part;
 
+      if (is_huawei_sms) {
+        part = mm_sms_part_cdma_new_from_pdu (info->index, info->pdu, self, &error);
+      } else {
         part = mm_sms_part_3gpp_new_from_pdu (info->index, info->pdu, self, &error);
+      }
         if (part) {
             mm_obj_dbg (self, "correctly parsed PDU (%d)", info->index);
             mm_iface_modem_messaging_take_part (MM_IFACE_MODEM_MESSAGING (self),
@@ -10463,8 +10508,7 @@ disabling_context_free (DisablingContext *ctx)
         mm_iface_modem_update_state (MM_IFACE_MODEM (ctx->self),
                                      MM_MODEM_STATE_DISABLED,
                                      MM_MODEM_STATE_CHANGE_REASON_USER_REQUESTED);
-    else if (ctx->previous_state != MM_MODEM_STATE_DISABLED &&
-             ctx->previous_state != MM_MODEM_STATE_UNKNOWN) {
+    else if (ctx->previous_state != MM_MODEM_STATE_DISABLED) {
         /* Fallback to previous state */
         mm_iface_modem_update_state (MM_IFACE_MODEM (ctx->self),
                                      ctx->previous_state,
@@ -10831,8 +10875,7 @@ enabling_context_free (EnablingContext *ctx)
         mm_iface_modem_update_state (MM_IFACE_MODEM (ctx->self),
                                      MM_MODEM_STATE_ENABLED,
                                      MM_MODEM_STATE_CHANGE_REASON_USER_REQUESTED);
-    else if (ctx->previous_state != MM_MODEM_STATE_ENABLED &&
-             ctx->previous_state != MM_MODEM_STATE_UNKNOWN) {
+    else if (ctx->previous_state != MM_MODEM_STATE_ENABLED) {
         /* Fallback to previous state */
         mm_iface_modem_update_state (MM_IFACE_MODEM (ctx->self),
                                      ctx->previous_state,

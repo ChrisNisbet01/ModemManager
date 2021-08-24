@@ -5605,6 +5605,15 @@ mm_iface_modem_is_3gpp_only (MMIfaceModem *self)
 }
 
 gboolean
+mm_iface_modem_is_huawei_sms (MMIfaceModem *self)
+{
+    /* Some Huawei modems only implement a reduced and renamed subset of
+     * GSM 07.05 commands for 3GPP2 SMS */
+    const gchar *model = mm_iface_modem_get_model (self);
+    return g_ascii_strcasecmp(model, "ME209u-526") == 0;
+}
+
+gboolean
 mm_iface_modem_is_cdma_only (MMIfaceModem *self)
 {
     return (mm_iface_modem_get_current_capabilities (self) == MM_MODEM_CAPABILITY_CDMA_EVDO);

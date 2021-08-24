@@ -919,7 +919,7 @@ mm_3gpp_cusd_regex_get (void)
 GRegex *
 mm_3gpp_cmti_regex_get (void)
 {
-    return g_regex_new ("\\r\\n\\+CMTI:\\s*\"(\\S+)\",\\s*(\\d+)\\r\\n",
+    return g_regex_new ("\\r\\n(?:\\+CMTI|\\^HCMTI):\\s*\"([^\"]*)\",\\s*(\\d+)\\r\\n",
                         G_REGEX_RAW | G_REGEX_OPTIMIZE,
                         0,
                         NULL);
@@ -931,7 +931,7 @@ mm_3gpp_cds_regex_get (void)
     /* Example:
      * <CR><LF>+CDS: 24<CR><LF>07914356060013F10659098136395339F6219011707193802190117071938030<CR><LF>
      */
-    return g_regex_new ("\\r\\n\\+CDS:\\s*(\\d+)\\r\\n(.*)\\r\\n",
+    return g_regex_new ("\\r\\n(?:\\+CDS|\\^HCDS):\\s*(\\d+)\\r\\n(.*)\\r\\n",
                         G_REGEX_RAW | G_REGEX_OPTIMIZE,
                         0,
                         NULL);
@@ -2098,7 +2098,7 @@ mm_3gpp_parse_cmgr_read_response (const gchar *reply,
 
     /* +CMGR: <stat>,<alpha>,<length>(whitespace)<pdu> */
     /* The <alpha> and <length> fields are matched, but not currently used */
-    r = g_regex_new ("\\+CMGR:\\s*(\\d+)\\s*,([^,]*),\\s*(\\d+)\\s*([^\\r\\n]*)", 0, 0, NULL);
+    r = g_regex_new ("(?:\\+CMGR|\\^HCMGR):\\s*(\\d+)\\s*,([^,]*),\\s*(\\d+)\\s*([^\\r\\n]*)", 0, 0, NULL);
     g_assert (r);
 
     if (!g_regex_match (r, reply, 0, &match_info)) {
@@ -2145,6 +2145,7 @@ mm_3gpp_parse_cmgr_read_response (const gchar *reply,
     info->index = index;
     info->status = status;
     info->pdu = pdu;
+    info->is_huawei_sms = (*g_match_info_fetch (match_info, 0) == '^');
 
 done:
     g_match_info_free (match_info);

@@ -394,6 +394,7 @@ gboolean          mm_iface_modem_is_3gpp_lte              (MMIfaceModem *self);
 gboolean          mm_iface_modem_is_3gpp_5gnr             (MMIfaceModem *self);
 gboolean          mm_iface_modem_is_cdma                  (MMIfaceModem *self);
 gboolean          mm_iface_modem_is_cdma_only             (MMIfaceModem *self);
+gboolean          mm_iface_modem_is_huawei_sms            (MMIfaceModem *self);
 
 /* Helpers to query supported modes */
 gboolean mm_iface_modem_is_2g      (MMIfaceModem *self);
