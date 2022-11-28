@@ -725,6 +725,52 @@ mm_modem_dup_device_identifier (MMModem *self)
         mm_gdbus_modem_dup_device_identifier (MM_GDBUS_MODEM (self)));
 }
 
+/**
+ * mm_modem_get_sys_fspath:
+ * @self: A #MMModem.
+ *
+ * Gets the physical modem sysfs path., which may be dependent upon the
+ * operating system.
+ *
+ * <warning>The returned value is only valid until the property changes so it is
+ * only safe to use this function on the thread where @self was constructed. Use
+ * mm_modem_dup_sys_fspath() if on another thread.</warning>
+ *
+ * Returns: (transfer none): The device, or %NULL if none available. Do not free
+ * the returned value, it belongs to @self.
+ *
+ * Since: 1.0
+ */
+const gchar *
+mm_modem_get_sys_fspath (MMModem *self)
+{
+    g_return_val_if_fail (MM_IS_MODEM (self), NULL);
+
+    RETURN_NON_EMPTY_CONSTANT_STRING (
+        mm_gdbus_modem_get_sys_fspath (MM_GDBUS_MODEM (self)));
+}
+
+/**
+ * mm_modem_dup_sys_fspath:
+ * @self: A #MMModem.
+ *
+ * Gets the physical modem sysfs path., which may be dependent upon the
+ * operating system.
+ *
+ * Returns: (transfer full): The device, or %NULL if none available. The
+ * returned value should be freed with g_free().
+ *
+ * Since: 1.0
+ */
+gchar *
+mm_modem_dup_sys_fspath (MMModem *self)
+{
+    g_return_val_if_fail (MM_IS_MODEM (self), NULL);
+
+    RETURN_NON_EMPTY_STRING (
+        mm_gdbus_modem_dup_sys_fspath (MM_GDBUS_MODEM (self)));
+}
+
 /*****************************************************************************/
 
 /**

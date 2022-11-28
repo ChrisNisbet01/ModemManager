@@ -352,11 +352,18 @@ device_added (MMBaseManager  *self,
     device = find_device_by_physdev_uid (self, physdev_uid);
     if (!device) {
         FindDeviceSupportContext *ctx;
+        const gchar *physdev_sys_fspath;
 
         mm_obj_dbg (self, "port %s is first in device %s", name, physdev_uid);
 
+        physdev_sys_fspath = mm_kernel_device_get_physdev_sysfs_path (port);
+
         /* Keep the device listed in the Manager */
-        device = mm_device_new (physdev_uid, hotplugged, FALSE, self->priv->object_manager);
+        device = mm_device_new (physdev_uid,
+                                physdev_sys_fspath,
+                                hotplugged,
+                                FALSE,
+                                self->priv->object_manager);
         g_hash_table_insert (self->priv->devices,
                              g_strdup (physdev_uid),
                              device);
@@ -1366,7 +1373,7 @@ handle_set_profile (MmGdbusTest *skeleton,
 
     /* Create device and keep it listed in the Manager */
     physdev_uid = g_strdup_printf ("/virtual/%s", id);
-    device = mm_device_new (physdev_uid, TRUE, TRUE, self->priv->object_manager);
+    device = mm_device_new (physdev_uid, "", TRUE, TRUE, self->priv->object_manager);
     g_hash_table_insert (self->priv->devices, physdev_uid, device);
 
     /* Grab virtual ports */

@@ -5368,6 +5368,13 @@ interface_initialization_step (GTask *task)
             mm_gdbus_modem_set_device (ctx->skeleton, device);
             g_free (device);
         }
+        /* Load sys_fspath if not done before */
+        if (!mm_gdbus_modem_get_sys_fspath (ctx->skeleton)) {
+            const gchar *sys_fspath;
+
+            sys_fspath = mm_base_modem_get_sys_fspath (MM_BASE_MODEM (self));
+            mm_gdbus_modem_set_sys_fspath (ctx->skeleton, sys_fspath);
+        }
         /* Load driver if not done before */
         if (!mm_gdbus_modem_get_drivers (ctx->skeleton)) {
             gchar **drivers;
@@ -6071,6 +6078,7 @@ mm_iface_modem_initialize (MMIfaceModem *self,
         mm_gdbus_modem_set_own_numbers (skeleton, NULL);
         mm_gdbus_modem_set_device_identifier (skeleton, NULL);
         mm_gdbus_modem_set_device (skeleton, NULL);
+        mm_gdbus_modem_set_sys_fspath(skeleton, NULL);
         mm_gdbus_modem_set_drivers (skeleton, NULL);
         mm_gdbus_modem_set_plugin (skeleton, NULL);
         mm_gdbus_modem_set_equipment_identifier (skeleton, NULL);

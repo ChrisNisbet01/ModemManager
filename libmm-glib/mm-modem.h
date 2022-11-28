@@ -116,6 +116,9 @@ gchar             *mm_modem_dup_hardware_revision    (MMModem *self);
 const gchar       *mm_modem_get_device_identifier    (MMModem *self);
 gchar             *mm_modem_dup_device_identifier    (MMModem *self);
 
+const gchar       *mm_modem_get_sys_fspath           (MMModem *self);
+gchar             *mm_modem_dup_sys_fspath           (MMModem *self);
+
 const gchar       *mm_modem_get_device               (MMModem *self);
 gchar             *mm_modem_dup_device               (MMModem *self);
 

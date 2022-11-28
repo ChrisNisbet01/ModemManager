@@ -34,6 +34,7 @@ typedef struct _MMDeviceClass MMDeviceClass;
 typedef struct _MMDevicePrivate MMDevicePrivate;
 
 #define MM_DEVICE_UID            "uid"
+#define MM_DEVICE_SYS_FSPATH     "sys-fspath"
 #define MM_DEVICE_PLUGIN         "plugin"
 #define MM_DEVICE_MODEM          "modem"
 #define MM_DEVICE_HOTPLUGGED     "hotplugged"
@@ -63,6 +64,7 @@ GType mm_device_get_type (void);
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (MMDevice, g_object_unref)
 
 MMDevice *mm_device_new (const gchar              *uid,
+                         const gchar              *sys_fspath,
                          gboolean                  hotplugged,
                          gboolean                  virtual,
                          GDBusObjectManagerServer *object_manager);

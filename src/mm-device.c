@@ -35,6 +35,7 @@ G_DEFINE_TYPE_EXTENDED (MMDevice, mm_device, G_TYPE_OBJECT, 0,
 enum {
     PROP_0,
     PROP_UID,
+    PROP_SYS_FSPATH,
     PROP_OBJECT_MANAGER,
     PROP_PLUGIN,
     PROP_MODEM,
@@ -59,6 +60,9 @@ struct _MMDevicePrivate {
 
     /* Unique id */
     gchar *uid;
+
+    /* The device system FS path */
+    gchar *sys_fspath;
 
     /* The object manager */
     GDBusObjectManagerServer *object_manager;
@@ -508,12 +512,15 @@ mm_device_create_modem (MMDevice  *self,
     }
 
     self->priv->modem = mm_plugin_create_modem (self->priv->plugin, self, error);
-    if (self->priv->modem)
+    if (self->priv->modem) {
+        mm_base_modem_set_sys_fspath (self->priv->modem, self->priv->sys_fspath);
+
         /* We want to get notified when the modem becomes valid/invalid */
         self->priv->modem_valid_id = g_signal_connect (self->priv->modem,
                                                        "notify::" MM_BASE_MODEM_VALID,
                                                        G_CALLBACK (modem_valid),
                                                        self);
+    }
 
     return !!self->priv->modem;
 }
@@ -756,6 +763,7 @@ log_object_build_id (MMLogObject *_self)
 
 MMDevice *
 mm_device_new (const gchar              *uid,
+               const gchar              *sys_fspath,
                gboolean                  hotplugged,
                gboolean                  virtual,
                GDBusObjectManagerServer *object_manager)
@@ -764,6 +772,7 @@ mm_device_new (const gchar              *uid,
 
     return MM_DEVICE (g_object_new (MM_TYPE_DEVICE,
                                     MM_DEVICE_UID,            uid,
+                                    MM_DEVICE_SYS_FSPATH,     sys_fspath,
                                     MM_DEVICE_HOTPLUGGED,     hotplugged,
                                     MM_DEVICE_VIRTUAL,        virtual,
                                     MM_DEVICE_OBJECT_MANAGER, object_manager,
@@ -789,6 +798,10 @@ set_property (GObject *object,
     case PROP_UID:
         /* construct only */
         self->priv->uid = g_value_dup_string (value);
+        break;
+    case PROP_SYS_FSPATH:
+        /* construct only */
+        self->priv->sys_fspath = g_value_dup_string (value);
         break;
     case PROP_OBJECT_MANAGER:
         /* construct only */
@@ -828,6 +841,9 @@ get_property (GObject *object,
     switch (prop_id) {
     case PROP_UID:
         g_value_set_string (value, self->priv->uid);
+        break;
+    case PROP_SYS_FSPATH:
+        g_value_set_string (value, self->priv->sys_fspath);
         break;
     case PROP_OBJECT_MANAGER:
         g_value_set_object (value, self->priv->object_manager);
@@ -880,6 +896,7 @@ finalize (GObject *object)
     MMDevice *self = MM_DEVICE (object);
 
     g_free (self->priv->uid);
+    g_free (self->priv->sys_fspath);
     g_strfreev (self->priv->drivers);
     g_strfreev (self->priv->virtual_ports);
 
@@ -912,6 +929,14 @@ mm_device_class_init (MMDeviceClass *klass)
                              NULL,
                              G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY);
     g_object_class_install_property (object_class, PROP_UID, properties[PROP_UID]);
+
+    properties[PROP_SYS_FSPATH] =
+        g_param_spec_string (MM_DEVICE_SYS_FSPATH,
+                             "System FS path",
+                             "The physical device sysfs path",
+                             NULL,
+                             G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY);
+    g_object_class_install_property (object_class, PROP_SYS_FSPATH, properties[PROP_SYS_FSPATH]);
 
     properties[PROP_OBJECT_MANAGER] =
         g_param_spec_object (MM_DEVICE_OBJECT_MANAGER,

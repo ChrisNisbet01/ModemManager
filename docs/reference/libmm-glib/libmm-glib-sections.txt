@@ -157,6 +157,8 @@ mm_modem_peek_ports
 mm_modem_get_ports
 mm_modem_get_device
 mm_modem_dup_device
+mm_modem_get_sys_fspath
+mm_modem_dup_sys_fspath
 mm_modem_get_equipment_identifier
 mm_modem_dup_equipment_identifier
 mm_modem_get_device_identifier

@@ -900,6 +900,19 @@
     <property name="Device" type="s" access="read" />
 
     <!--
+        SysFSPath:
+
+        The physical modem sysfs path, which may be dependent upon the 
+        operating system.
+
+        In Linux for example, this points to a sysfs path of the usb_device
+        object.
+
+        Since: 1.21
+    -->
+    <property name="SysFSPath" type="s" access="read" />
+
+    <!--
         Drivers:
 
         The Operating System device drivers handling communication with the modem

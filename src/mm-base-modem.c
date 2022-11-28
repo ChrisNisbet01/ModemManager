@@ -53,6 +53,7 @@ enum {
     PROP_VALID,
     PROP_MAX_TIMEOUTS,
     PROP_DEVICE,
+    PROP_SYS_FSPATH,
     PROP_DRIVERS,
     PROP_PLUGIN,
     PROP_VENDOR_ID,
@@ -85,6 +86,7 @@ struct _MMBaseModemPrivate {
     gulong invalid_if_cancelled;
 
     gchar *device;
+    gchar *sys_fspath;
     gchar **drivers;
     gchar *plugin;
 
@@ -1721,6 +1723,23 @@ mm_base_modem_get_device (MMBaseModem *self)
     return self->priv->device;
 }
 
+void
+mm_base_modem_set_sys_fspath (MMBaseModem *self, const gchar *sys_fspath)
+{
+    g_return_if_fail (MM_IS_BASE_MODEM (self));
+
+    g_free (self->priv->sys_fspath);
+    self->priv->sys_fspath = g_strdup (sys_fspath);
+}
+
+const gchar *
+mm_base_modem_get_sys_fspath (MMBaseModem *self)
+{
+    g_return_val_if_fail (MM_IS_BASE_MODEM (self), NULL);
+
+    return self->priv->sys_fspath;
+}
+
 const gchar **
 mm_base_modem_get_drivers (MMBaseModem *self)
 {
@@ -1906,6 +1925,10 @@ set_property (GObject *object,
         g_free (self->priv->device);
         self->priv->device = g_value_dup_string (value);
         break;
+    case PROP_SYS_FSPATH:
+        g_free (self->priv->sys_fspath);
+        self->priv->sys_fspath = g_value_dup_string (value);
+        break;
     case PROP_DRIVERS:
         g_strfreev (self->priv->drivers);
         self->priv->drivers = g_value_dup_boxed (value);
@@ -1960,6 +1983,9 @@ get_property (GObject *object,
     case PROP_DEVICE:
         g_value_set_string (value, self->priv->device);
         break;
+    case PROP_SYS_FSPATH:
+        g_value_set_string (value, self->priv->sys_fspath);
+        break;
     case PROP_DRIVERS:
         g_value_set_boxed (value, self->priv->drivers);
         break;
@@ -2005,6 +2031,7 @@ finalize (GObject *object)
     mm_obj_dbg (self, "completely disposed");
 
     g_free (self->priv->device);
+    g_free (self->priv->sys_fspath);
     g_strfreev (self->priv->drivers);
     g_free (self->priv->plugin);
 
@@ -2095,6 +2122,14 @@ mm_base_modem_class_init (MMBaseModemClass *klass)
                              NULL,
                              G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY);
     g_object_class_install_property (object_class, PROP_DEVICE, properties[PROP_DEVICE]);
+
+    properties[PROP_SYS_FSPATH] =
+        g_param_spec_string (MM_BASE_MODEM_SYS_FSPATH,
+                             "SysFSPath",
+                             "Main modem parent device system FS path",
+                             NULL,
+                             G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY);
+    g_object_class_install_property (object_class, PROP_SYS_FSPATH, properties[PROP_SYS_FSPATH]);
 
     properties[PROP_DRIVERS] =
         g_param_spec_boxed (MM_BASE_MODEM_DRIVERS,
